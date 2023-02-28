@@ -1,0 +1,532 @@
+Automating Infrastructure on Google Cloud with Terraform: Challenge Lab
+=======================================================================
+===============================Task 1. Create the configuration files================================
+Step 1: In Cloud Shell, create your Terraform configuration files and a directory structure that resembles the following:
+
+main.tf
+variables.tf
+modules/
+└── instances
+    ├── instances.tf
+    ├── outputs.tf
+    └── variables.tf
+└── storage
+    ├── storage.tf
+    ├── outputs.tf
+    └── variables.tf
+	
+	
+touch main.tf
+touch variables.tf
+mkdir modules/
+mkdir -p modules/instances
+mkdir -p modules/storage
+touch modules/instances/instances.tf
+touch modules/instances/outputs.tf
+touch modules/instances/variables.tf
+touch modules/storage/storage.tf
+touch modules/storage/outputs.tf
+touch modules/storage/variables.tf
+
+
+Step 2: Fill out the variables.tf files in the root directory and within the modules:
+
+variable "region" {
+  description = "The name of the region resource is being created"
+  default     = "us-east1"
+}
+variable "zone" {
+  description = "The name of the zone resource is being created"
+  default     = "us-east1-c"
+}
+variable "project_id" {
+  description = "The name of the project resource is being created"
+  default     = "qwiklabs-gcp-00-54bea1c63d27"
+}
+
+
+Step 3: Add the Terraform block and the Google Provider to the main.tf file.
+
+main.tf:
+=-------
+terraform {
+  required_providers {
+    google = {
+      source = "hashicorp/google"
+    }
+  }
+}
+provider "google" {
+  project     = var.project_id
+  region      = var.region
+  zone		  = var.zone
+}
+
+
+
+===================================================Task 2. Import infrastructure===================================================
+Step 1: add the module reference into the main.tf file then re-initialize Terraform.
+
+terraform {
+  required_providers {
+    google = {
+      source = "hashicorp/google"
+    }
+  }
+}
+provider "google" {
+  project     = var.project_id
+  region      = var.region
+  zone		  = var.zone
+}
+module "instances" {
+  source = "./modules/instances"
+}
+
+$ terraform init
+
+
+Step 2: write the resource configurations in the instances.tf file to match the pre-existing instances.
+
+Note: by running below commands, you can find its Instance ID, boot disk image, and machine type. These are all necessary for writing the configurations correctly and importing them into Terraform.
+
+$ gcloud compute instances list
+$ gcloud compute instances describe tf-instance-1
+
+
+instances.tf
+=-----------
+resource "google_compute_instance" "vm_instance_1" {
+  name         = "tf-instance-1"
+  machine_type = "n1-standard-1"
+  boot_disk {
+    initialize_params {
+      image = "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-10-buster-v20230206"
+    }
+  }
+  network_interface {
+    network = "default"
+    access_config {
+    }
+  }
+  metadata_startup_script = <<-EOT
+        #!/bin/bash
+    EOT
+  allow_stopping_for_update = true
+}
+resource "google_compute_instance" "vm_instance_2" {
+  name         = "tf-instance-2"
+  machine_type = "n1-standard-1"
+  boot_disk {
+    initialize_params {
+      image = "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-10-buster-v20230206"
+    }
+  }
+  network_interface {
+    network = "default"
+    access_config {
+    }
+  }
+  metadata_startup_script = <<-EOT
+        #!/bin/bash
+    EOT
+  allow_stopping_for_update = true
+}
+
+
+outputs.tf
+=---------
+output "instance_id_1" {
+  description = "Instance ID of vm_instance_1"
+  value       = google_compute_instance.vm_instance_1.instance_id
+}
+output "instance_id_2" {
+  description = "Instance ID of vm_instance_2"
+  value       = google_compute_instance.vm_instance_2.instance_id
+}
+output "instance_identifier_1" {
+  description = "ID of vm_instance_1"
+  value       = google_compute_instance.vm_instance_1.id
+}
+output "instance_identifier_2" {
+  description = "ID of vm_instance_2"
+  value       = google_compute_instance.vm_instance_2.id
+}
+
+
+Step 3: use the terraform import command to import them into your instances module.
+
+$ terraform import module.instances.google_compute_instance.vm_instance_1 projects/qwiklabs-gcp-00-54bea1c63d27/zones/us-east1-c/instances/tf-instance-1
+$ terraform import module.instances.google_compute_instance.vm_instance_2 projects/qwiklabs-gcp-00-54bea1c63d27/zones/us-east1-c/instances/tf-instance-2
+
+$ terraform show
+$ terraform plan
+$ terraform apply
+
+
+
+===================================================Task 3. Configure a remote backend===================================================
+Step 1: Create a Cloud Storage bucket resource inside the storage module: storage.tf
+
+resource "google_storage_bucket" "bucket-for-state" {
+  name        				  = "tf-bucket-837512"
+  location    				  = "US"
+  force_destroy 			  = true
+  uniform_bucket_level_access = true
+}
+
+
+Step 2: Add the module reference to the main.tf file. Initialize the module and apply the changes to create the bucket using Terraform.
+terraform {
+  required_providers {
+    google = {
+      source = "hashicorp/google"
+    }
+  }
+}
+provider "google" {
+  project     = var.project_id
+  region      = var.region
+  zone		  = var.zone
+}
+module "instances" {
+  source = "./modules/instances"
+}
+module "storage" {
+  source = "./modules/storage"
+}
+
+
+outputs.tf
+=---------
+output "bucket" {
+  description = "The created storage bucket"
+  value       = google_storage_bucket.bucket-for-state
+}
+
+
+$ terraform init
+$ terraform plan
+$ terraform apply
+
+
+Step 3: Configure this storage bucket as the remote backend inside the main.tf file. 
+
+terraform {
+  required_providers {
+    google = {
+      source = "hashicorp/google"
+    }
+  }
+  backend "gcs" {
+    bucket  = "tf-bucket-837512"
+    prefix  = "terraform/state"
+  }
+}
+provider "google" {
+  project     = var.project_id
+  region      = var.region
+  zone		  = var.zone
+}
+module "instances" {
+  source = "./modules/instances"
+}
+module "storage" {
+  source = "./modules/storage"
+}
+
+
+$ terraform init -migrate-state
+
+
+
+=====================================Task 4. Modify and update infrastructure========================================
+Step 1: Modify the tf-instance-1 and tf-instance-2 resource to use an n1-standard-2 machine type, then add a similar third instance resource.
+
+Instances.tf
+=-----------
+resource "google_compute_instance" "vm_instance_1" {
+  name         = "tf-instance-1"
+  machine_type = "n1-standard-2"
+  boot_disk {
+    initialize_params {
+      image = "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-10-buster-v20230206"
+    }
+  }
+  network_interface {
+    network = "default"
+    access_config {
+    }
+  }
+  metadata_startup_script = <<-EOT
+        #!/bin/bash
+    EOT
+  allow_stopping_for_update = true
+}
+resource "google_compute_instance" "vm_instance_2" {
+  name         = "tf-instance-2"
+  machine_type = "n1-standard-2"
+  boot_disk {
+    initialize_params {
+      image = "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-10-buster-v20230206"
+    }
+  }
+  network_interface {
+    network = "default"
+    access_config {
+    }
+  }
+  metadata_startup_script = <<-EOT
+        #!/bin/bash
+    EOT
+  allow_stopping_for_update = true
+}
+resource "google_compute_instance" "vm_instance_3" {
+  name         = "tf-instance-755486"
+  machine_type = "n1-standard-2"
+  boot_disk {
+    initialize_params {
+      image = "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-10-buster-v20230206"
+    }
+  }
+  network_interface {
+    network = "default"
+    access_config {
+    }
+  }
+  metadata_startup_script = <<-EOT
+        #!/bin/bash
+    EOT
+  allow_stopping_for_update = true
+}
+
+
+$ terraform init
+$ terraform plan
+$ terraform apply
+
+
+
+
+=======================================Task 5. Destroy resources====================================
+# Destroy the third instance Instance Name by removing the resource from the configuration file. After removing it, initialize terraform and apply the changes.
+
+Instances.tf
+=-----------
+resource "google_compute_instance" "vm_instance_1" {
+  name         = "tf-instance-1"
+  machine_type = "n1-standard-2"
+  boot_disk {
+    initialize_params {
+      image = "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-10-buster-v20230206"
+    }
+  }
+  network_interface {
+    network = "default"
+    access_config {
+    }
+  }
+  metadata_startup_script = <<-EOT
+        #!/bin/bash
+    EOT
+  allow_stopping_for_update = true
+}
+resource "google_compute_instance" "vm_instance_2" {
+  name         = "tf-instance-2"
+  machine_type = "n1-standard-2"
+  boot_disk {
+    initialize_params {
+      image = "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-10-buster-v20230206"
+    }
+  }
+  network_interface {
+    network = "default"
+    access_config {
+    }
+  }
+  metadata_startup_script = <<-EOT
+        #!/bin/bash
+    EOT
+  allow_stopping_for_update = true
+}
+
+$ terraform plan
+$ terraform apply
+
+
+
+==================================Task 6. Use a module from the Registry=============================================
+Step 1: Use a module from the Registry
+
+main.tf 
+=-------
+terraform {
+  required_providers {
+    google = {
+      source = "hashicorp/google"
+    }
+  }
+  backend "gcs" {
+    bucket  = "tf-bucket-837512"
+    prefix  = "terraform/state"
+  }
+}
+provider "google" {
+  project     = var.project_id
+  region      = var.region
+  zone		  = var.zone
+}
+module "instances" {
+  source = "./modules/instances"
+}
+module "storage" {
+  source = "./modules/storage"
+}
+module "vpc" {
+    source  = "terraform-google-modules/network/google"
+    version = "~> 6.0"
+
+    project_id   = var.project_id
+    network_name = "tf-vpc-905033"
+    routing_mode = "GLOBAL"
+
+    subnets = [
+        {
+            subnet_name           = "subnet-01"
+            subnet_ip             = "10.10.10.0/24"
+            subnet_region         = "us-east1"
+        },
+        {
+            subnet_name           = "subnet-02"
+            subnet_ip             = "10.10.20.0/24"
+            subnet_region         = "us-east1"
+        }
+    ]
+}
+
+$ terraform init
+$ terraform plan
+$ terraform apply
+
+
+Step 2: navigate to the instances.tf file and update the configuration resources to connect tf-instance-1 to subnet-01 and tf-instance-2 to subnet-02.
+
+Instances.tf
+=-----------
+resource "google_compute_instance" "vm_instance_1" {
+  name         = "tf-instance-1"
+  machine_type = "n1-standard-2"
+  boot_disk {
+    initialize_params {
+      image = "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-10-buster-v20230206"
+    }
+  }
+  network_interface {
+    network = "tf-vpc-905033"
+	subnetwork = "subnet-01"
+    access_config {
+    }
+  }
+  metadata_startup_script = <<-EOT
+        #!/bin/bash
+    EOT
+  allow_stopping_for_update = true
+}
+resource "google_compute_instance" "vm_instance_2" {
+  name         = "tf-instance-2"
+  machine_type = "n1-standard-2"
+  boot_disk {
+    initialize_params {
+      image = "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/images/debian-10-buster-v20230206"
+    }
+  }
+  network_interface {
+    network    = "tf-vpc-905033"
+	subnetwork = "subnet-02"
+    access_config {
+    }
+  }
+  metadata_startup_script = <<-EOT
+        #!/bin/bash
+    EOT
+  allow_stopping_for_update = true
+}
+
+
+
+$ terraform plan
+$ terraform apply
+
+
+
+=================================Task 7. Configure a firewall==================================
+Note: 
+To retrieve the required network argument, you can inspect the state and find the ID or self_link of the google_compute_network resource you created. 
+It will be in the form projects/PROJECT_ID/global/networks/ VPC Name.
+
+
+$ terraform show
+# update network argument using the ID or self_link from the output
+
+
+main.tf
+=------
+terraform {
+  required_providers {
+    google = {
+      source = "hashicorp/google"
+    }
+  }
+  backend "gcs" {
+    bucket  = "tf-bucket-837512"
+    prefix  = "terraform/state"
+  }
+}
+provider "google" {
+  project     = var.project_id
+  region      = var.region
+  zone		  = var.zone
+}
+module "instances" {
+  source = "./modules/instances"
+}
+module "storage" {
+  source = "./modules/storage"
+}
+module "vpc" {
+    source  = "terraform-google-modules/network/google"
+    version = "~> 6.0"
+
+    project_id   = var.project_id
+    network_name = "tf-vpc-905033"
+    routing_mode = "GLOBAL"
+
+    subnets = [
+        {
+            subnet_name           = "subnet-01"
+            subnet_ip             = "10.10.10.0/24"
+            subnet_region         = "us-east1"
+        },
+        {
+            subnet_name           = "subnet-02"
+            subnet_ip             = "10.10.20.0/24"
+            subnet_region         = "us-east1"
+        }
+    ]
+}
+resource "google_compute_firewall" "tf-firewall" {
+  name    = "tf-firewall"
+  network = "projects/qwiklabs-gcp-00-54bea1c63d27/global/networks/tf-vpc-905033"
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+}
+
+
+$ terraform init
+$ terraform plan
+$ terraform apply

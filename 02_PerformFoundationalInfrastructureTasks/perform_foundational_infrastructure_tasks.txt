@@ -1,0 +1,50 @@
+Perform Foundational Infrastructure Tasks in Google Cloud: Challenge Lab
+========================================================================
+========================================Task 1. Create a bucket========================================
+gsutil mb -l us-east1 gs://memories-bucket-92219
+gsutil ls 
+
+
+========================================Task 2. Create a Pub/Sub topic========================================
+gcloud pubsub topics create memories-topic-213
+gcloud pubsub topics list
+
+
+========================================Task 3. Create the thumbnail Cloud Function======================================
+Step 1: create the index.json and package.json files 
+
+$ ls *json
+index.js
+package.json
+
+
+
+Step 2: deploy the function. Ensure you're deploying from the directory where you created index.json and package.json files
+
+gcloud functions deploy memories-thumbnail-generator \
+	--runtime nodejs14 \
+	--region us-east1 \
+	--entry-point thumbnail \
+	--trigger-resource memories-bucket-92219 \
+	--trigger-event google.storage.object.finalize
+
+
+
+Step 3: Download the Image and upload to bucket created in Task 1
+
+Download the image from URL:
+$ curl https://storage.googleapis.com/cloud-training/gsp315/map.jpg -o map.jpg
+
+
+$ gsutil cp map.jpg gs://memories-bucket-92219
+$ gsutil ls gs://memories-bucket-92219
+gs://memories-bucket-92219/map.64x64_thumbnail.jpg
+gs://memories-bucket-92219/map.jpg
+
+
+Navigation menu -> Cloud Storage
+Refresh bucket
+
+
+Note: 
+you can complete all tasks using Cloud Console

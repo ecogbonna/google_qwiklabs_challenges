@@ -1,0 +1,172 @@
+Set Up and Configure a Cloud Environment in Google Cloud: Challenge Lab
++=====================================================================+
+
+====================== Task 1. Create development VPC manually ======================
+
+gcloud compute networks create griffin-dev-vpc --subnet-mode=custom && \
+gcloud compute networks subnets create griffin-dev-wp --network=griffin-dev-vpc --region=us-east1 --range=192.168.16.0/20 && \
+gcloud compute networks subnets create griffin-dev-mgmt --network=griffin-dev-vpc --region=us-east1 --range=192.168.32.0/20
+
+
+====================== Task 2. Create production VPC manually ======================
+
+gcloud compute networks create griffin-prod-vpc --subnet-mode=custom && \
+gcloud compute networks subnets create griffin-prod-wp --network=griffin-prod-vpc --region=us-east1 --range=192.168.48.0/20 && \
+gcloud compute networks subnets create griffin-prod-mgmt --network=griffin-prod-vpc --region=us-east1 --range=192.168.64.0/20
+
+gcloud compute networks list
+gcloud compute networks subnets list --sort-by=NETWORK
+
+
+Create Firewall Rules:
+gcloud compute firewall-rules create griffin-prod-vpc-allow-icmp-ssh-rdp --direction=INGRESS \
+--priority=1000 --network=griffin-prod-vpc --action=ALLOW --rules=tcp:22 --source-ranges=0.0.0.0/0
+
+gcloud compute firewall-rules create griffin-dev-vpc-allow-icmp-ssh-rdp --direction=INGRESS \
+--priority=1000 --network=griffin-dev-vpc --action=ALLOW --rules=tcp:22 --source-ranges=0.0.0.0/0
+
+gcloud compute firewall-rules list --sort-by NETWORK
+
+
+====================== Task 3. Create bastion host ======================
+
+gcloud compute instances create griffin-bastion --zone=us-east1-b --machine-type=n1-standard-1 \
+--network-interface=network-tier=PREMIUM,subnet=griffin-prod-mgmt --network-interface=network-tier=PREMIUM,subnet=griffin-dev-mgmt 
+
+$ gcloud compute instances list --sort-by=ZONE
+	
+	
+
+====================== Task 4. Create and configure Cloud SQL Instance ======================
+Step 1:
+In the console, select Navigation menu > SQL.
+
+	1. Click CREATE INSTANCE > Choose MySQL .
+
+	2. Enter instance id as griffin-dev-db
+
+	3. Enter a secure password in the Password field (remember it!)
+	   Root Password: @V1rKk3}oTRYjGr$
+
+	4. Select the database version as MySQL 5.7.
+
+	5. Set the Multi zones (Highly available) field as <Lab Region>
+
+	6. Click CREATE INSTANCE.
+
+It might take a few minutes for the instance to be created. Once it is, you will see a green checkmark next to the instance name.
+
+	7. Click on the Cloud SQL instance. The SQL Overview page opens.
+
+Or:
+gcloud sql instances create griffin-dev-db --root-password @V1rKk3}oTRYjGr$ --tier=db-n1-standard-2 --region=us-east1
+gcloud sql instances create griffin-dev-db --root-password @V1rKk3}oTRYjGr$ --region=us-east1
+
+
+Click Add User Account and create an account, using wp_user as the username and stormwind_rules as the password.
+Leave the Host name option set to Allow any host (%). and click ADD.
+
+
+Step 2:
+gcloud sql connect griffin-dev-db --user=root --quiet
+
+
+
+Step 3:
+SHOW DATABASES;
+CREATE DATABASE wordpress;
+GRANT ALL PRIVILEGES ON wordpress.* TO "wp_user"@"%";
+FLUSH PRIVILEGES;
+
+
+
+
+====================== Task 5. Create Kubernetes cluster ======================
+
+gcloud container clusters create --machine-type=n1-standard-4 --num-nodes "2" --network griffin-dev-vpc --subnetwork griffin-dev-wp --zone=us-east1-b griffin-dev 
+gcloud container clusters list
+
+$ gcloud container clusters get-credentials nucleus-kcluster --zone=us-central1-a
+$ source <(kubectl completion bash)
+
+
+
+
+====================== Task 6. Prepare the Kubernetes cluster ======================
+1. Use Cloud Shell and copy all files from gs://cloud-training/gsp321/wp-k8s.
+
+$ gsutil cp -r gs://cloud-training/gsp321/wp-k8s .
+
+
+
+2. You create two Kubernetes Secrets: one to provide the MySQL credentials and one to provide the Google credentials (the service account).
+
+	1. To create a Secret for your MySQL credentials, enter the following in the Cloud Shell:
+	
+		configure the username to wp_user and password to stormwind_rules before creating the configuration.
+		add the following secrets and volume to the cluster using wp-env.yaml
+		
+		$ cd wp-k8s
+		$ sed -i s/username_goes_here/wp_user/g wp-env.yaml
+		$ sed -i s/password_goes_here/stormwind_rules/g wp-env.yaml
+		
+		$ cat wp-env.yaml
+		
+		$ kubectl apply -f wp-env.yaml
+		$ kubectl get secrets
+		
+	2.  service account that was already set up. This service account provides access to the database for a sidecar container. Service account should have role "Cloud SQL Client".
+		
+		Verify Service account:
+		navigate to IAM & Admin> IAM -> cloud-sql-proxy@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com -> role tab
+		
+		Create JSon key:
+	
+		gcloud iam service-accounts keys create key.json \
+			--iam-account=cloud-sql-proxy@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com
+		kubectl create secret generic cloudsql-instance-credentials \
+			--from-file key.json
+		
+		$ kubectl get secrets
+		NAME                            TYPE     DATA   AGE
+		cloudsql-instance-credentials   Opaque   1      7s
+		database                        Opaque   2      4m17s
+
+
+
+====================== Task 7. Create a WordPress deployment ======================
+
+1. Before you create the deployment you need to edit wp-deployment.yaml.
+
+	$ vi wp-k8s/wp-deployment.yaml
+	
+	
+	
+	
+2. Replace YOUR_SQL_INSTANCE with griffin-dev-db's Instance connection name.
+
+$ export SQL_NAME=$(gcloud sql instances describe griffin-dev-db --format="value(connectionName)")
+$ sed -i 's/YOUR_SQL_INSTANCE/'"${SQL_NAME}"'/g' wp-deployment.yaml
+$ cat wp-deployment.yaml
+$ kubectl apply -f wp-deployment.yaml
+
+
+
+   
+3. After you create your WordPress deployment, create the service with wp-service.yaml.
+
+$ cat wp-service.yaml
+$ kubectl apply -f wp-service.yaml
+$ kubectl get services
+
+
+====================== Task 8. Enable monitoring ====================== 
+
+Monitoring > Uptime and select “+ Create Uptime Check” and then select the new Kubernetes Loadbalancer Service option.
+TCP, port 80
+
+
+
+====================== Task 9. Provide access for an additional engineer ====================== 
+
+IAM > Grant Access
